@@ -1,0 +1,227 @@
+---
+title: "PracticalMachineLearningCourseProject"
+author: "zhanyou Xu"
+date: "December 27, 2015"
+output: html_document
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r include=FALSE}
+.libPaths("C:/0U531720_Data/StudyData1/BackUp/OneDrive/Courses/R_workshop")
+if(!require(caret)){install.packages('caret', dependencies = T); library(caret)}
+if(!require(tree)){install.packages('tree', dependencies = T); library(tree)}
+if(!require(kernlab)){install.packages('kernlab', dependencies = T); library(kernlab)}
+if(!require(e1071)){install.packages('e1071', dependencies = T); library(e1071)}
+if(!require(ISLR)){install.packages('ISLR', dependencies = T); library(ISLR)}
+```
+
+
+Step 1: read in both training and testing data sets
+
+
+
+```{r}
+AssignmentTrianingData=read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",na.strings = c("NA", "#DIV/0!"), stringsAsFactors = T)
+AssignmentTestData=read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", na.strings = c("NA", "#DIV/0!"), stringsAsFactors = T)
+dim(AssignmentTrianingData)
+names(AssignmentTrianingData)
+dim(AssignmentTestData)
+names(AssignmentTestData)==names(AssignmentTrianingData) # to compare the names betweeb training and testing sets
+table(AssignmentTrianingData$classe)
+sum(is.na(AssignmentTrianingData)) # to count how many NAs
+# there are 1925102 NAs in the trainig data set
+
+```
+
+Step 2: find which columns have most of the NAs, if there are 50% of the data points with NAs, remove these columns
+
+```{r}
+NA_counts=apply(AssignmentTrianingData, 2, function(x){sum(is.na(x))})
+NA_counts
+sum(NA_counts>nrow(AssignmentTrianingData)/2) # to count how many columns have more than 50% of NAs
+
+# resulst: there are 100 columns which have more than 50% of NAs. these columns need to be removed
+
+```
+
+step 3: remove the columns wich have more than 50% NAs in the training data set
+
+```{r}
+# write a function named "Column_selected" which collected all the columns with less than 50% NAs
+Column_selected=""
+counter=0
+for (i in 1: length(NA_counts)){
+  if(NA_counts[i]<nrow(AssignmentTrianingData)/2 && i!=length(NA_counts)){
+    
+   Column_selected= paste(Column_selected, "^",names(NA_counts)[i], "$","|", sep="")
+   counter=counter+1
+  }else if (NA_counts[i]<nrow(AssignmentTrianingData)/2 && i==length(NA_counts)){
+    Column_selected= paste(Column_selected, names(NA_counts)[i], sep="")
+    counter=counter+1
+  }
+}
+
+AssignmentTrianingData1=AssignmentTrianingData[, grep(Column_selected, names(AssignmentTrianingData))]
+AssignmentTestData1=AssignmentTestData[, grep(Column_selected, names(AssignmentTestData))]
+
+dim(AssignmentTrianingData1)
+dim(AssignmentTestData1)
+sum(is.na(AssignmentTrianingData1)) # to check whether there is still NAs
+# : there is no any NAs in the new dataset
+summary(AssignmentTrianingData1) # to check the columns left in the data set
+#AssignmentTrianingData1[,1] # first column is the row number from 1 to 19622, need to be excluded from the predictors
+
+predictorsTrain=AssignmentTrianingData1[, -1]
+dim(predictorsTrain) # now this training predictors data have 59 columns
+
+```
+
+step 4: model selection: first divided the original training data into two parts: 75% of the data as trainingTree, and the rest 25% as testingTree data, and then 
+        compre different models to select the best model for the assignemnt
+
+```{r}
+# model.fit1
+set.seed(10000)
+trainSample=sample(1:nrow(predictorsTrain), nrow(predictorsTrain)/4*3)
+traingTree=predictorsTrain[trainSample,]
+testingTree=predictorsTrain[-trainSample,]
+dim(traingTree); dim(testingTree)
+
+model.fit1=train(traingTree$classe~., method='rpart', preProcess='pca', data=traingTree)
+model.fit1
+print(model.fit1$finalModel)
+table(predictorsTrain$classe)
+library(rattle)
+fancyRpartPlot(model.fit1$finalModel, cex=0.9)
+
+predicted_Results=predict(model.fit1, newdata=testingTree)
+
+confusionMatrix(predicted_Results, testingTree$classe)
+# prediction accuracy is about 46% which is very low
+
+predicted_ByModel1=predict(model.fit1, AssignmentTestData) # using model.fit1 to predict the test data for the assignment
+predicted_ByModel1
+
+
+#predicted_Results1=paste(AssignmentTestData$problem_id,predicted_Results, sep="_")
+#predicted_Results1
+```
+
+
+```{r}
+# model.fit2 using package tree
+
+# fit the model.fit2 tree model using new created traing data "trainingTree"
+model.fit2=tree(classe~., traingTree)
+summary(model.fit2)
+
+plot(model.fit2); text(model.fit2, pretty = 0)
+
+# check how the model.fit2 is doing uing the testingTree data
+
+tree_predicted=predict(model.fit2, testingTree, type="class")
+
+mean(tree_predicted==testingTree$classe) # check the the percentage of matching classification
+
+# prune the tree
+# cross validation to check where to stop pruning
+cv_tree=cv.tree(model.fit2, FUN = prune.misclass)
+names(cv_tree)
+plot(cv_tree$size, cv_tree$dev, type="b", cex=2)
+
+prune_model=prune.misclass(model.fit2, best=18)
+
+# check how the pruned model doing
+
+tree_predicted1=predict(prune_model, testingTree, type="class")
+mean(tree_predicted1== testingTree$classe) # 76.78% correctly classificed 
+
+predicted_ByModel2=predict(prune_model, AssignmentTestData, type="class")
+
+predicted_ByModel1==predicted_ByModel2 # to compare the predicted results from model.fit1 and fit2
+
+# to calculate the percentage of consistency of the predictions between from model.fit1 and model.fit2
+table(predicted_ByModel1==predicted_ByModel2)[2] / length(predicted_ByModel2) *100
+```
+
+
+```{r}
+# model.fit3 using random forest
+library(randomForest)
+#ctrl=trainControl(method = "repeatedcv", repeats=5,classProbs = TRUE)
+model.fit3=randomForest(classe~., data=traingTree)
+model.fit3
+summary(model.fit3)
+predicted_ByModel3=predict(model.fit3, testingTree, type="class") # 
+
+table(predicted_ByModel3, testingTree$classe)
+
+PercentageOfMisclass=mean(predicted_ByModel3!=testingTree$classe)*100 # calculate the percentage of misclassification
+100-PercentageOfMisclass  # calculate the percentage of prediction/classification accuracy
+
+# Results is: classification accuracy is 99.91847 percent
+
+```
+
+## Final model using random forest
+
+```{r}
+
+# since random forest has model has the highest prediction accuract, we will use this method and use all the 19622 rows as our final training data set to train 
+# ourr model, and then to predict the 20 cases
+finalTrainingData=AssignmentTrianingData1[, -1]; 
+dim(finalTrainingData)
+
+dim(AssignmentTestData1)
+AssignmentTestDataSelected.variables=AssignmentTestData1[, c(-1)]
+dim(AssignmentTestDataSelected.variables)
+
+AssignmentTestDataSelected.variables$classe=as.factor(sample(c("A","B","C","D","E"), nrow(AssignmentTestData1), prob=c(0.8, 0.05,0.05,0.05,0.05),replace = T))
+
+AssignmentTestDataSelected.variables[1:20, 59]
+dim(finalTrainingData)
+dim(AssignmentTestDataSelected.variables)
+names(finalTrainingData)==names(AssignmentTestDataSelected.variables)
+levels(AssignmentTestDataSelected.variables$classe) = levels(finalTrainingData$classe)
+### to solve the problem with "Type of predictors in new data do not match that of the training data", I use rbind to combind both the training and testing 
+### datasets have SAME datastructure
+
+bothTraingANDtesting=rbind(finalTrainingData, AssignmentTestDataSelected.variables)
+dim(bothTraingANDtesting)
+trainDATA=bothTraingANDtesting[1:19622,]
+testDATA=bothTraingANDtesting[19623:19642,]
+testDATA[,59]==AssignmentTestDataSelected.variables[1:20, 59] # this step to check whether the testing Data is same after using rbind and slicing
+model.Final=randomForest(classe~., data=trainDATA)
+predicted_By_FinalModel=predict(model.Final, testDATA)
+predicted_By_FinalModel
+table(predicted_By_FinalModel)
+
+# the final answer for the 20 cases are:
+finalResults=paste(AssignmentTestData$classe, predicted_By_FinalModel, sep = "_")
+finalResults
+
+```
+
+
+### wite the answers to 20 files for submission
+```{r}
+setwd("C:/0U531720_Data/StudyData1/BackUp/OneDrive/Courses/2015 Fall Practical Machine Learning from Johns Hopkins University/Assignment_PML")
+answers = predicted_By_FinalModel
+
+pml_write_files=function(x){
+  n=length(x)
+  for (i in 1:n){
+    fileName=paste0("Probelem_id_", i, ".txt")
+    write.table(x[i], file = fileName, row.names = F, col.names = F)
+  }
+}
+pml_write_files(answers)
+
+```
+
+
+Note that the `echo = TRUE/FALSE` parameter was added to the code chunk to include/prevent printing of the R code that generated the plot.
